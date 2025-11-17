@@ -121,7 +121,7 @@ class _AnalysisPageState extends State<AnalysisPage> {
         wasteData['dinner']!.reduce((a, b) => a + b);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Food Waste Analysis'), backgroundColor: Colors.green),
+      //appBar: AppBar(title: const Text('Food Waste Analysis'), backgroundColor: Colors.green),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(

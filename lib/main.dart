@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mitush/splashscreen.dart';
 import 'Loginpage.dart';
 
 import 'package:firebase_core/firebase_core.dart';
@@ -24,7 +25,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: const LoginScreen(), // Start with the login page
+      home: const SplashScreen(), // Start with the login page
     );
   }
 }

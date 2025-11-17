@@ -4,12 +4,13 @@ import 'analysis.dart';
 import 'contact.dart';
 import 'Loginpage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'db_service.dart'; // <-- new import
 
 class HomePage extends StatefulWidget {
   final String username;
-  final String rollNumber;
+  final String email;
 
-  const HomePage({super.key, required this.username, required this.rollNumber});
+  const HomePage({super.key, required this.username, required this.email});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -19,86 +20,83 @@ class _HomePageState extends State<HomePage> {
   int _selectedIndex = 0;
   String _title = 'Home';
 
-  late List<Widget> _pages;
-
-  // Variables for date and time
+  // date/time strings
   String formattedDate = DateFormat('EEEE, dd MMMM yyyy').format(DateTime.now());
   String formattedTime = DateFormat('hh:mm a').format(DateTime.now());
 
-  // Meal wastage variables for today (initialized to 0)
+  // today's totals
   double totalBreakfastWasted = 0.0;
   double totalLunchWasted = 0.0;
   double totalDinnerWasted = 0.0;
 
+  final FirestoreService _db = FirestoreService(); // service from db_service.dart
+
   @override
   void initState() {
     super.initState();
-    _pages = [
-      _buildHomeContent(),
-      AnalysisPage(username: widget.username, rollNumber: widget.rollNumber),
-      const ContactPage(),
-    ];
-    _updateTime();
     _fetchMealWastageData();
+    _updateTime();
   }
 
-  // Function to update the time every minute instead of every second
   void _updateTime() {
     Future.delayed(const Duration(minutes: 1), () {
+      if (!mounted) return;
       setState(() {
         formattedTime = DateFormat('hh:mm a').format(DateTime.now());
         formattedDate = DateFormat('EEEE, dd MMMM yyyy').format(DateTime.now());
       });
-      _updateTime(); // Repeat the update every minute
+      _updateTime();
     });
   }
 
-  // Fetch today's meal wastage data from Firestore
-  void _fetchMealWastageData() async {
+  /// Loads today's totals for the logged-in user using DBService.fetchByRollNo.
+  Future<void> _fetchMealWastageData() async {
     try {
-      // Get today's index (0 = Monday, 1 = Tuesday, ..., 6 = Sunday)
-      int todayIndex = DateTime.now().weekday - 1; // DateTime.weekday returns 1 for Monday, 7 for Sunday
+      double breakfast = 0.0;
+      double lunch = 0.0;
+      double dinner = 0.0;
 
-      // Fetch the document from Firestore
-      DocumentSnapshot doc = await FirebaseFirestore.instance
-          .collection('food_wastage')
-          .doc(widget.rollNumber)
-          .get();
+      // Fetch all docs for this email
+      final docs = await _db.fetchByEmail(widget.email);
 
-      if (doc.exists) {
-        // Retrieve the 'wasteData' map from the document
-        Map<String, dynamic> wasteData = doc['wasteData'] ?? {};
+      print("DEBUG: found ${docs.length} docs for ${widget.email}");
 
-        // Get the daily data for breakfast, lunch, and dinner
-        List<dynamic> breakfastData = wasteData['breakfast'] ?? [];
-        List<dynamic> lunchData = wasteData['lunch'] ?? [];
-        List<dynamic> dinnerData = wasteData['dinner'] ?? [];
+      for (final raw in docs) {
+        print("DEBUG: raw doc => $raw");
 
-        // Get today's wasted value from each meal list based on today's index
-        setState(() {
-          totalBreakfastWasted = _getWastedAmount(breakfastData, todayIndex);
-          totalLunchWasted = _getWastedAmount(lunchData, todayIndex);
-          totalDinnerWasted = _getWastedAmount(dinnerData, todayIndex);
-        });
+        int slot = raw['Slot'];        // guaranteed number
+        double weight = raw['Weight'].toDouble();  // guaranteed number → convert to double
 
-        // Debug prints to check values
-        print('Today\'s Breakfast Wasted: $totalBreakfastWasted');
-        print('Today\'s Lunch Wasted: $totalLunchWasted');
-        print('Today\'s Dinner Wasted: $totalDinnerWasted');
-      } else {
-        print('No document found for rollNumber: ${widget.rollNumber}');
+        if (slot == 1) {
+          breakfast += weight;
+        } else if (slot == 2) {
+          lunch += weight;
+        } else if (slot == 3) {
+          dinner += weight;
+        } else {
+          print("DEBUG: unknown slot: $slot");
+        }
       }
-    } catch (e) {
-      print('Error fetching meal wastage data: $e');
-    }
-  }
 
-  // Helper function to return wasted amount, ensuring null safety
-  double _getWastedAmount(List<dynamic> data, int todayIndex) {
-    if (data.length > todayIndex && data[todayIndex] is double) {
-      return data[todayIndex] as double;
+      if (!mounted) return;
+
+      setState(() {
+        totalBreakfastWasted = breakfast;
+        totalLunchWasted = lunch;
+        totalDinnerWasted = dinner;
+      });
+
+      print("TOTALS → Breakfast: $breakfast, Lunch: $lunch, Dinner: $dinner");
+
+    } catch (e, st) {
+      print("Error: $e\n$st");
+      if (!mounted) return;
+      setState(() {
+        totalBreakfastWasted = 0.0;
+        totalLunchWasted = 0.0;
+        totalDinnerWasted = 0.0;
+      });
     }
-    return 0.0;
   }
 
   Widget _buildHomeContent() {
@@ -109,9 +107,9 @@ class _HomePageState extends State<HomePage> {
         children: [
           Row(
             children: [
-              Expanded(child: _buildUserCard()), // User card
+              Expanded(child: _buildUserCard()),
               const SizedBox(width: 40),
-              Expanded(child: _buildTimeCard()), // Time and Date display card
+              Expanded(child: _buildTimeCard()),
             ],
           ),
           const SizedBox(height: 20),
@@ -149,14 +147,8 @@ class _HomePageState extends State<HomePage> {
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
           ),
           const SizedBox(height: 8),
-          Text(
-            'Name: ${widget.username}',
-            style: const TextStyle(fontSize: 18, color: Colors.white),
-          ),
-          Text(
-            'Roll Number: ${widget.rollNumber}',
-            style: const TextStyle(fontSize: 16, color: Colors.white70),
-          ),
+          Text('Name: ${widget.username}', style: const TextStyle(fontSize: 18, color: Colors.white)),
+          Text('Email: ${widget.email}', style: const TextStyle(fontSize: 16, color: Colors.white70)),
         ],
       ),
     );
@@ -172,14 +164,8 @@ class _HomePageState extends State<HomePage> {
           backgroundColor: color.withOpacity(0.2),
           child: Icon(icon, color: color),
         ),
-        title: Text(
-          meal,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-        ),
-        trailing: Text(
-          'Wasted: ${wasted.toStringAsFixed(2)} units',
-          style: const TextStyle(fontSize: 14, color: Colors.red),
-        ),
+        title: Text(meal, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        trailing: Text('Wasted: ${wasted.toStringAsFixed(2)} units', style: const TextStyle(fontSize: 14, color: Colors.red)),
       ),
     );
   }
@@ -205,23 +191,9 @@ class _HomePageState extends State<HomePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Text(
-            formattedDate,
-            style: const TextStyle(
-              fontSize: 18,
-              color: Colors.white,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+          Text(formattedDate, style: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
-          Text(
-            formattedTime,
-            style: const TextStyle(
-              fontSize: 36,
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+          Text(formattedTime, style: const TextStyle(fontSize: 36, color: Colors.white, fontWeight: FontWeight.bold)),
         ],
       ),
     );
@@ -230,14 +202,10 @@ class _HomePageState extends State<HomePage> {
   void _logout() async {
     bool shouldLogout = await _showLogoutDialog();
     if (shouldLogout) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const LoginScreen()), // Redirect to Login Page
-      );
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LoginScreen()));
     }
   }
 
-  // Confirm logout with a dialog
   Future<bool> _showLogoutDialog() {
     return showDialog<bool>(
       context: context,
@@ -245,14 +213,8 @@ class _HomePageState extends State<HomePage> {
         title: const Text('Logout'),
         content: const Text('Are you sure you want to logout?'),
         actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Logout'),
-          ),
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Logout')),
         ],
       ),
     ).then((value) => value ?? false);
@@ -260,31 +222,33 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    Widget activePage;
+    switch (_selectedIndex) {
+      case 1:
+        activePage = AnalysisPage(username: widget.username, rollNumber: widget.email);
+        break;
+      case 2:
+        activePage = const ContactPage();
+        break;
+      default:
+        activePage = _buildHomeContent();
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text(_title, style: const TextStyle(fontWeight: FontWeight.bold)),
         centerTitle: true,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: "Logout",
-            onPressed: _logout,
-          ),
+          IconButton(icon: const Icon(Icons.refresh), tooltip: "Refresh", onPressed: _fetchMealWastageData),
+          IconButton(icon: const Icon(Icons.logout), tooltip: "Logout", onPressed: _logout),
         ],
         flexibleSpace: Container(
           decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Colors.green, Colors.lightGreenAccent],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+            gradient: LinearGradient(colors: [Colors.green, Colors.lightGreenAccent], begin: Alignment.topLeft, end: Alignment.bottomRight),
           ),
         ),
       ),
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 300),
-        child: _pages[_selectedIndex],
-      ),
+      body: AnimatedSwitcher(duration: const Duration(milliseconds: 300), child: activePage),
       bottomNavigationBar: BottomNavigationBar(
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
@@ -296,25 +260,13 @@ class _HomePageState extends State<HomePage> {
         unselectedItemColor: Colors.grey,
         elevation: 10,
         backgroundColor: Colors.white,
-        onTap: _onItemTapped,
+        onTap: (int index) {
+          setState(() {
+            _selectedIndex = index;
+            _title = (index == 0) ? 'Home' : (index == 1) ? 'Analysis' : 'Contact';
+          });
+        },
       ),
     );
-  }
-
-  void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-      switch (index) {
-        case 0:
-          _title = 'Home';
-          break;
-        case 1:
-          _title = 'Analysis';
-          break;
-        case 2:
-          _title = 'Contact';
-          break;
-      }
-    });
   }
 }
