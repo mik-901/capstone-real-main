@@ -1,215 +1,264 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:intl/intl.dart'; // For date formatting
 
 class AnalysisPage extends StatefulWidget {
-  final String username;
-  final String rollNumber;
+  final String username; // This is the rollNumber
+  final String rollNumber; // Redundant, but keeping for existing usage. Will use username as rollNumber.
+  final String uid; // <-- NEW: The Firebase Auth UID for security rules
 
-  const AnalysisPage({super.key, required this.username, required this.rollNumber});
+  const AnalysisPage({
+    super.key,
+    required this.username,
+    required this.rollNumber,
+    required this.uid, // <-- NEW: Must accept the UID
+  });
 
   @override
   State<AnalysisPage> createState() => _AnalysisPageState();
 }
 
 class _AnalysisPageState extends State<AnalysisPage> {
-  // A map to store food wastage data for breakfast, lunch, and dinner
+  // Map to store daily totals for each meal type over the last 30 days
+  // Key: meal type (e.g., 'breakfast'), Value: List of 30 doubles (each for a day)
   Map<String, List<double>> wasteData = {
-    'breakfast': List.generate(30, (index) => 0.0),
-    'lunch': List.generate(30, (index) => 0.0),
-    'dinner': List.generate(30, (index) => 0.0),
+    'Breakfast': List.filled(30, 0.0), // Changed to match mealSlot string values
+    'Lunch': List.filled(30, 0.0),
+    'Dinner': List.filled(30, 0.0),
   };
 
-  List<int> days = List.generate(30, (index) => index + 1);
-  TextEditingController wasteController = TextEditingController();
-  String selectedCategory = 'breakfast';
+  // List of actual dates for the last 30 days, to be used for graph labels
+  List<DateTime> last30Days = [];
+  String selectedMealType = 'Breakfast'; // Default selected meal type for the graph
+
+  bool _isLoading = true; // State to manage loading indicator
 
   @override
   void initState() {
     super.initState();
-    fetchWasteData();
+    _initializeDates();
+    _fetchAndAggregateWasteData();
   }
 
-  // Fetch data from Firestore and populate the 'wasteData' map
-  void fetchWasteData() async {
+  void _initializeDates() {
+    final now = DateTime.now();
+    for (int i = 29; i >= 0; i--) { // Go back 29 days from today to get 30 days
+      last30Days.add(DateTime(now.year, now.month, now.day).subtract(Duration(days: i)));
+    }
+  }
+
+  /// Fetches individual food waste entries from Firestore and aggregates them into daily totals.
+  Future<void> _fetchAndAggregateWasteData() async {
+    setState(() {
+      _isLoading = true;
+      // Reset wasteData before fetching new data
+      wasteData = {
+        'Breakfast': List.filled(30, 0.0),
+        'Lunch': List.filled(30, 0.0),
+        'Dinner': List.filled(30, 0.0),
+      };
+    });
+
     try {
-      DocumentSnapshot doc = await FirebaseFirestore.instance
-          .collection('food_wastage')
-          .doc(widget.rollNumber)
+      final now = DateTime.now();
+      final thirtyDaysAgo = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 29)); // Start of the 30-day period
+
+      // Query the user's specific foodWaste subcollection
+      final QuerySnapshot<Map<String, dynamic>> snapshot = await FirebaseFirestore.instance
+          .collection('students')
+          .doc(widget.rollNumber) // Use rollNumber (widget.username) as the doc ID
+          .collection('foodWaste')
+          .where('timestamp', isGreaterThanOrEqualTo: thirtyDaysAgo)
+          .where('timestamp', isLessThanOrEqualTo: now) // Fetch up to current moment
+          .orderBy('timestamp', descending: false) // Order to process chronologically
           .get();
 
-      // Debug: Check if document exists
-      if (doc.exists) {
-        print('Document found for rollNumber: ${widget.rollNumber}');
-
-        // Check if 'wasteData' field exists in the document
-        if (doc['wasteData'] != null) {
-          Map<String, dynamic> data = doc['wasteData'];
-
-          // Check for each category and populate the map
-          data.forEach((category, value) {
-            if (value != null) {
-              List<dynamic> categoryData = value;
-              wasteData[category] = categoryData.map((item) {
-                return (item is int) ? item.toDouble() : item as double;
-              }).toList();
-            }
-          });
-
-          print('wasteData field found: $wasteData');
-          setState(() {});
-        } else {
-          print('wasteData field is null, initializing with default values.');
-          setState(() {
-            wasteData = {
-              'breakfast': List.generate(30, (index) => 0.0),
-              'lunch': List.generate(30, (index) => 0.0),
-              'dinner': List.generate(30, (index) => 0.0),
-            };
-          });
-        }
+      if (snapshot.docs.isEmpty) {
+        print('No food waste data found for ${widget.rollNumber} in the last 30 days.');
       } else {
-        print('No document found for rollNumber: ${widget.rollNumber}');
-        setState(() {
-          wasteData = {
-            'breakfast': List.generate(30, (index) => 0.0),
-            'lunch': List.generate(30, (index) => 0.0),
-            'dinner': List.generate(30, (index) => 0.0),
-          };
-        });
+        print('Found ${snapshot.docs.length} food waste entries for ${widget.rollNumber}.');
+
+        for (final doc in snapshot.docs) {
+          final data = doc.data();
+          final Timestamp? timestamp = data['timestamp'] as Timestamp?;
+          final String? mealSlot = data['mealSlot'] as String?;
+          final double? weight = (data['weight'] as num?)?.toDouble(); // Safely cast num to double
+
+          if (timestamp == null || mealSlot == null || weight == null || !wasteData.containsKey(mealSlot)) {
+            print("Skipping malformed or incomplete document: ${doc.id}");
+            continue;
+          }
+
+          final entryDate = timestamp.toDate();
+          final dayIndex = last30Days.indexWhere((date) =>
+          date.year == entryDate.year &&
+              date.month == entryDate.month &&
+              date.day == entryDate.day);
+
+          if (dayIndex != -1) { // If the date falls within our 30-day window
+            setState(() {
+              wasteData[mealSlot]![dayIndex] += weight;
+            });
+          }
+        }
       }
-    } catch (e) {
-      print('Error fetching data: $e');
+    } catch (e, st) {
+      print('Error fetching and aggregating data: $e\n$st');
+    } finally {
       setState(() {
-        wasteData = {
-          'breakfast': List.generate(30, (index) => 0.0),
-          'lunch': List.generate(30, (index) => 0.0),
-          'dinner': List.generate(30, (index) => 0.0),
-        };
+        _isLoading = false;
       });
     }
   }
 
-  void updateWasteData(int day, double value, String category) async {
-    // Ensure the category exists and is initialized
-    if (wasteData[category] == null) {
-      wasteData[category] = List.generate(30, (index) => 0.0); // Initialize if null
-    }
 
-    // Update the local list first
-    setState(() {
-      wasteData[category]![day - 1] = value;
-    });
-
-    try {
-      // Update the 'wasteData' field in Firestore
-      await FirebaseFirestore.instance
-          .collection('food_wastage')
-          .doc(widget.rollNumber)
-          .set({'wasteData': wasteData});
-      print('Data updated for rollNumber: ${widget.rollNumber}');
-    } catch (e) {
-      print('Error updating data: $e');
-    }
-  }
+  // This method for manual updates is removed as per the architecture:
+  // Pi sends data, app reads and aggregates.
+  // void updateWasteData(int day, double value, String category) async { /* ... removed ... */ }
 
 
   @override
   Widget build(BuildContext context) {
-    double totalWasted = wasteData['breakfast']!.reduce((a, b) => a + b) +
-        wasteData['lunch']!.reduce((a, b) => a + b) +
-        wasteData['dinner']!.reduce((a, b) => a + b);
+    // Calculate total wasted for display
+    double totalWasted = 0.0;
+    wasteData.values.forEach((list) {
+      totalWasted += list.reduce((a, b) => a + b);
+    });
 
     return Scaffold(
-      //appBar: AppBar(title: const Text('Food Waste Analysis'), backgroundColor: Colors.green),
-      body: Padding(
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFF00A64F)))
+          : Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Name: ${widget.username}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            Text('Roll Number: ${widget.rollNumber}', style: const TextStyle(fontSize: 18)),
+            Text('Roll Number: ${widget.rollNumber}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            Text('Total Food Wasted (Last 30 Days): ${totalWasted.toStringAsFixed(2)}g', style: const TextStyle(fontSize: 18, color: Colors.red)),
             const SizedBox(height: 20),
-            Text('Total Food Wasted: $totalWasted grams', style: const TextStyle(fontSize: 18, color: Colors.red)),
-            const SizedBox(height: 20),
+
+            // Dropdown to select meal type for the graph
             DropdownButton<String>(
-              value: selectedCategory,
+              value: selectedMealType,
               onChanged: (value) {
                 setState(() {
-                  selectedCategory = value!;
+                  selectedMealType = value!;
                 });
               },
-              items: ['breakfast', 'lunch', 'dinner']
+              items: ['Breakfast', 'Lunch', 'Dinner']
                   .map<DropdownMenuItem<String>>((String value) {
                 return DropdownMenuItem<String>(
                   value: value,
-                  child: Text(value[0].toUpperCase() + value.substring(1)),
+                  child: Text(value),
                 );
               }).toList(),
             ),
             const SizedBox(height: 20),
-            TextField(
-              controller: wasteController,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: 'Enter waste for $selectedCategory (grams)',
-                border: OutlineInputBorder(),
-              ),
-              onSubmitted: (value) {
-                double waste = double.tryParse(value) ?? 0.0;
-                int today = DateTime.now().day;
-                updateWasteData(today, waste, selectedCategory);
-                wasteController.clear();
-              },
-            ),
-            const SizedBox(height: 20),
+
+            // Removed the TextField and related functionality for manual data entry
+            // TextField(
+            //   controller: wasteController,
+            //   keyboardType: TextInputType.number,
+            //   decoration: InputDecoration(
+            //     labelText: 'Enter waste for $selectedMealType (grams)',
+            //     border: OutlineInputBorder(),
+            //   ),
+            //   onSubmitted: (value) {
+            //     double waste = double.tryParse(value) ?? 0.0;
+            //     int today = DateTime.now().day;
+            //     updateWasteData(today, waste, selectedMealType); // This would require re-implementing logic
+            //     wasteController.clear();
+            //   },
+            // ),
+            // const SizedBox(height: 20),
+
             Expanded(
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: SizedBox(
-                  width: 30 * 30.0,
+                  width: 30 * 30.0, // Adjust width based on desired bar spacing and count
                   child: BarChart(
                     BarChartData(
-                      barGroups: wasteData[selectedCategory]!
+                      barGroups: wasteData[selectedMealType]!
                           .asMap()
                           .entries
                           .map((entry) {
-                        int index = entry.key;
+                        int index = entry.key; // 0 to 29 for the 30 days
                         double value = entry.value;
                         return BarChartGroupData(
                           x: index,
                           barRods: [
-                            BarChartRodData(toY: value, color: Colors.blue, width: 8, borderRadius: BorderRadius.circular(4)),
+                            BarChartRodData(
+                              toY: value,
+                              color: Theme.of(context).primaryColor, // Using app's primary color
+                              width: 8,
+                              borderRadius: BorderRadius.circular(4),
+                              backDrawRodData: BackgroundBarChartRodData(
+                                show: true,
+                                toY: (wasteData.values.map((list) => list.reduce((a, b) => a > b ? a : b))).reduce((a, b) => a > b ? a : b), // Max waste across all meals
+                                color: Colors.grey.withOpacity(0.1),
+                              ),
+                            ),
                           ],
                         );
                       }).toList(),
+                      // Configure titles and grid for the chart
                       titlesData: FlTitlesData(
+                        show: true,
+                        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                         leftTitles: AxisTitles(
-                          axisNameWidget: const Text("Grams", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                          axisNameWidget: const Text("Weight (g)", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                           sideTitles: SideTitles(
                             showTitles: true,
                             reservedSize: 40,
-                            interval: 10,
-                            getTitlesWidget: (value, meta) => Text('${value.toInt()}'),
+                            interval: 50, // Adjust interval based on typical waste amounts
+                            getTitlesWidget: (value, meta) => Text(value.toInt().toString(), style: const TextStyle(fontSize: 12)),
                           ),
                         ),
                         bottomTitles: AxisTitles(
                           axisNameWidget: const Text("Date", style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                           sideTitles: SideTitles(
                             showTitles: true,
-                            interval: 5,
+                            reservedSize: 30, // Space for labels
+                            interval: 1, // Show every day
                             getTitlesWidget: (value, meta) {
                               int index = value.toInt();
-                              if (index >= 0 && index < days.length) {
-                                return Text(days[index].toString(), style: const TextStyle(fontSize: 12));
+                              if (index >= 0 && index < last30Days.length) {
+                                // Format date to show just day of month
+                                return SideTitleWidget(
+                                  axisSide: meta.axisSide,
+                                  child: Text(DateFormat('d').format(last30Days[index]), style: const TextStyle(fontSize: 10)),
+                                );
                               }
                               return const Text('');
                             },
                           ),
                         ),
                       ),
-                      borderData: FlBorderData(show: true),
-                      gridData: FlGridData(show: true, drawHorizontalLine: true, drawVerticalLine: false),
+                      borderData: FlBorderData(show: true, border: Border.all(color: const Color(0xff37434d), width: 1)),
+                      gridData: FlGridData(show: true, drawVerticalLine: false),
+                      // Optional: touch interaction for details
+                      // barTouchData: BarTouchData(
+                      //   touchTooltipData: BarTouchTooltipData(
+                      //     tooltipBgColor: Colors.blueGrey,
+                      //     getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                      //       String date = DateFormat('MMM d').format(last30Days[group.x.toInt()]);
+                      //       return BarTooltipItem(
+                      //         '$date\n',
+                      //         const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      //         children: <TextSpan>[
+                      //           TextSpan(
+                      //             text: '${rod.toY.toStringAsFixed(2)}g',
+                      //             style: const TextStyle(color: Colors.yellow, fontSize: 16, fontWeight: FontWeight.bold),
+                      //           ),
+                      //         ],
+                      //       );
+                      //     },
+                      //   ),
+                      // ),
                     ),
                   ),
                 ),

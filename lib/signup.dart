@@ -52,6 +52,8 @@
 // }
 
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // Import for UserCredential and FirebaseAuthException
+import 'package:cloud_firestore/cloud_firestore.dart'; // Import for Firestore
 import 'Loginpage.dart';
 import 'auth_services.dart';
 
@@ -66,25 +68,42 @@ class _SignupScreenState extends State<SignupScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _authService = AuthService();
+
   void _signup() async {
     try {
       final roll = _emailController.text.trim();
       final password = _passwordController.text.trim();
 
       if (roll.isEmpty || password.isEmpty) {
-        throw "Roll number and password cannot be empty";
+        // You can make this throw a more specific exception for better handling
+        throw ArgumentError("Roll number and password cannot be empty.");
       }
 
       // remove spaces/newlines just in case
       final cleanRoll = roll.replaceAll(" ", "").replaceAll("\n", "");
 
-      // 👉 THIS IS WHERE @gmail.com IS APPENDED
+      // THIS IS WHERE @gmail.com IS APPENDED
       final email = "$cleanRoll@gmail.com";
 
-      await _authService.signup(email, password);
+      // 1. Perform Firebase Authentication signup
+      // IMPORTANT: Your _authService.signup method MUST return Future<UserCredential>
+      final UserCredential userCredential = await _authService.signup(email, password);
+      final User? user = userCredential.user;
+
+      if (user == null) {
+        throw Exception("User was not created by Firebase Authentication.");
+      }
+
+      // 2. Create the corresponding /students/{rollNumber} document in Firestore
+      // This links the rollNumber to the Firebase Auth UID, crucial for security rules.
+      await FirebaseFirestore.instance.collection('students').doc(cleanRoll).set({
+        'firebaseAuthUid': user.uid,
+        // You can add other initial student data here if needed,
+        // e.g., 'createdAt': FieldValue.serverTimestamp(),
+      });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Account created. Please log in.")),
+        const SnackBar(content: Text("Account created successfully. Please log in.")),
       );
 
       Navigator.pushReplacement(
@@ -92,12 +111,17 @@ class _SignupScreenState extends State<SignupScreen> {
         MaterialPageRoute(builder: (_) => const LoginScreen()),
       );
     } catch (e) {
+      String errorMessage = "Signup failed: $e";
+      if (e is FirebaseAuthException) {
+        errorMessage = "Signup failed: ${e.message}";
+      } else if (e is ArgumentError) {
+        errorMessage = "Signup failed: ${e.message}";
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Signup failed: $e")),
+        SnackBar(content: Text(errorMessage)),
       );
     }
   }
-
 
 
   @override
@@ -137,16 +161,17 @@ class _SignupScreenState extends State<SignupScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // Email field
+                  // Email field (used for Roll Number input)
                   TextField(
                     controller: _emailController,
                     decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.email_outlined),
+                      prefixIcon: Icon(Icons.person_outline), // Changed icon to person for roll number
                       hintText: "Roll Number",
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.all(Radius.circular(12)),
                       ),
                     ),
+                    keyboardType: TextInputType.number, // Suggest numeric keyboard
                   ),
                   const SizedBox(height: 15),
 
@@ -179,7 +204,7 @@ class _SignupScreenState extends State<SignupScreen> {
                       ),
                       child: const Text(
                         "Create Account",
-                        style: TextStyle(fontSize: 16),
+                        style: TextStyle(fontSize: 16, color: Colors.white), // Added white color for text
                       ),
                     ),
                   ),
@@ -188,14 +213,14 @@ class _SignupScreenState extends State<SignupScreen> {
 
                   // Terms & Privacy
                   const Text(
-                    "By signing up, you agree to Ticketspace's Terms of Use and Privacy Policy.",
+                    "By signing up, you agree to the Terms of Use and Privacy Policy.", // Generic text
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
 
                   const SizedBox(height: 20),
 
-                  // Social buttons
+                  // Social buttons (kept as is, though not tied to Firebase Auth here)
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -247,3 +272,4 @@ class _SignupScreenState extends State<SignupScreen> {
     );
   }
 }
+

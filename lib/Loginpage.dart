@@ -73,9 +73,10 @@
 
 
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // Import for FirebaseAuthException and User
 import 'package:mitush/signup.dart';
 import 'auth_services.dart';
-import 'home.dart';
+import 'home.dart'; // Assuming your HomePage class is in home.dart
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -95,7 +96,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final password = _passwordController.text.trim();
 
       if (roll.isEmpty || password.isEmpty) {
-        throw "Roll number and password cannot be empty";
+        throw ArgumentError("Roll number and password cannot be empty.");
       }
 
       // Remove spaces/newlines
@@ -104,25 +105,38 @@ class _LoginScreenState extends State<LoginScreen> {
       // Convert roll → hidden email
       final email = "$cleanRoll@gmail.com";
 
-      // Firebase login
-      await _authService.login(email, password);
+      // Firebase login - now returns UserCredential
+      final UserCredential userCredential = await _authService.login(email, password);
+      final User? user = userCredential.user;
 
-      // Extract username (roll number)
+      if (user == null) {
+        throw Exception("Login failed: No user information found after authentication.");
+      }
+
+      // Extract username (roll number) and the crucial Firebase Auth UID
       String username = cleanRoll;
+      String firebaseUid = user.uid; // Get the user's UID
 
-      // Navigate exactly like before
+      // Navigate to HomePage, passing the roll number and Firebase UID
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (_) => HomePage(
             username: username,
-            email: email,
+            email: email, // You might still want to pass this
+            uid: firebaseUid, // <-- Pass the Firebase Auth UID
           ),
         ),
       );
     } catch (e) {
+      String errorMessage = "Login failed: $e";
+      if (e is FirebaseAuthException) {
+        errorMessage = "Login failed: ${e.message}";
+      } else if (e is ArgumentError) {
+        errorMessage = "Login failed: ${e.message}";
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Login failed: $e")),
+        SnackBar(content: Text(errorMessage)),
       );
     }
   }
@@ -164,16 +178,17 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // Email field
+                  // Roll Number field
                   TextField(
                     controller: _emailController,
                     decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.email_outlined),
+                      prefixIcon: Icon(Icons.person_outline), // Changed icon for roll number
                       hintText: "Roll Number",
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.all(Radius.circular(12)),
                       ),
                     ),
+                    keyboardType: TextInputType.number, // Suggest numeric keyboard
                   ),
                   const SizedBox(height: 15),
 
@@ -194,7 +209,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     alignment: Alignment.centerRight,
                     child: TextButton(
                       onPressed: () {
-                        // TODO: Forgot password
+                        // TODO: Forgot password - Consider integrating Firebase password reset functionality here
                       },
                       child: const Text("Forgot your Password?"),
                     ),
@@ -216,7 +231,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       child: const Text(
                         "Continue",
-                        style: TextStyle(fontSize: 16),
+                        style: TextStyle(fontSize: 16, color: Colors.white), // Added white color for text
                       ),
                     ),
                   ),
@@ -225,14 +240,14 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   // Terms & Privacy
                   const Text(
-                    "By login, you agree to Ticketspace's Terms of Use and Privacy Policy.",
+                    "By logging in, you agree to the Terms of Use and Privacy Policy.", // Generic text
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
 
                   const SizedBox(height: 20),
 
-                  // Social buttons
+                  // Social buttons (kept as is, not integrated with Firebase Auth here)
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -284,3 +299,4 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
+

@@ -3,14 +3,22 @@ import 'package:intl/intl.dart';
 import 'analysis.dart';
 import 'contact.dart';
 import 'Loginpage.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'db_service.dart'; // <-- new import
+import 'package:cloud_firestore/cloud_firestore.dart'; // Import for Firestore
+import 'auth_services.dart'; // Import AuthService for logout
+
+// REMOVE: import 'db_service.dart'; // <-- This service will no longer be used directly here
 
 class HomePage extends StatefulWidget {
-  final String username;
+  final String username; // This is actually the rollNumber
   final String email;
+  final String uid; // <-- NEW: Add uid parameter
 
-  const HomePage({super.key, required this.username, required this.email});
+  const HomePage({
+    super.key,
+    required this.username,
+    required this.email,
+    required this.uid, // <-- NEW: uid is now required
+  });
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -29,7 +37,9 @@ class _HomePageState extends State<HomePage> {
   double totalLunchWasted = 0.0;
   double totalDinnerWasted = 0.0;
 
-  final FirestoreService _db = FirestoreService(); // service from db_service.dart
+  final AuthService _authService = AuthService(); // Initialize AuthService for logout
+
+  // REMOVE: final FirestoreService _db = FirestoreService(); // This service will no longer be used directly here
 
   @override
   void initState() {
@@ -49,32 +59,51 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-  /// Loads today's totals for the logged-in user using DBService.fetchByRollNo.
+  /// Loads today's totals for the logged-in user using direct Firestore query.
   Future<void> _fetchMealWastageData() async {
     try {
       double breakfast = 0.0;
       double lunch = 0.0;
       double dinner = 0.0;
 
-      // Fetch all docs for this email
-      final docs = await _db.fetchByEmail(widget.email);
+      final now = DateTime.now();
+      // Define the start and end of the current day for the query
+      final startOfDay = DateTime(now.year, now.month, now.day);
+      final endOfDay = DateTime(now.year, now.month, now.day, 23, 59, 59, 999); // Include milliseconds for full day
 
-      print("DEBUG: found ${docs.length} docs for ${widget.email}");
+      // Query Firestore for food waste data specific to this user's roll number and today's date
+      final QuerySnapshot<Map<String, dynamic>> snapshot = await FirebaseFirestore.instance
+          .collection('students')
+          .doc(widget.username) // Use widget.username as the rollNumber document ID
+          .collection('foodWaste')
+          .where('timestamp', isGreaterThanOrEqualTo: startOfDay)
+          .where('timestamp', isLessThanOrEqualTo: endOfDay)
+          .get();
 
-      for (final raw in docs) {
-        print("DEBUG: raw doc => $raw");
+      print("DEBUG: found ${snapshot.docs.length} docs for roll number ${widget.username} for today.");
 
-        int slot = raw['Slot'];        // guaranteed number
-        double weight = raw['Weight'].toDouble();  // guaranteed number → convert to double
+      for (final doc in snapshot.docs) {
+        final data = doc.data(); // Get the data map from the document
+        print("DEBUG: raw doc => $data");
 
-        if (slot == 1) {
+        // Access fields using the new names: 'mealSlot' (String) and 'weight' (double)
+        final String? mealSlot = data['mealSlot'] as String?;
+        // Ensure weight is treated as a num first, then converted to double to handle potential int or double from Firestore
+        final double? weight = (data['weight'] as num?)?.toDouble();
+
+        if (mealSlot == null || weight == null) {
+          print("DEBUG: Document with ID ${doc.id} has missing 'mealSlot' or 'weight' field. Skipping.");
+          continue; // Skip this document if data is incomplete
+        }
+
+        if (mealSlot == 'Breakfast') {
           breakfast += weight;
-        } else if (slot == 2) {
+        } else if (mealSlot == 'Lunch') {
           lunch += weight;
-        } else if (slot == 3) {
+        } else if (mealSlot == 'Dinner') {
           dinner += weight;
         } else {
-          print("DEBUG: unknown slot: $slot");
+          print("DEBUG: unknown mealSlot: $mealSlot for doc ${doc.id}. Skipping.");
         }
       }
 
@@ -89,7 +118,7 @@ class _HomePageState extends State<HomePage> {
       print("TOTALS → Breakfast: $breakfast, Lunch: $lunch, Dinner: $dinner");
 
     } catch (e, st) {
-      print("Error: $e\n$st");
+      print("Error fetching meal wastage data: $e\n$st");
       if (!mounted) return;
       setState(() {
         totalBreakfastWasted = 0.0;
@@ -147,7 +176,7 @@ class _HomePageState extends State<HomePage> {
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
           ),
           const SizedBox(height: 8),
-          Text('Name: ${widget.username}', style: const TextStyle(fontSize: 18, color: Colors.white)),
+          Text('Roll No: ${widget.username}', style: const TextStyle(fontSize: 18, color: Colors.white)), // Display Roll No
           Text('Email: ${widget.email}', style: const TextStyle(fontSize: 16, color: Colors.white70)),
         ],
       ),
@@ -165,7 +194,7 @@ class _HomePageState extends State<HomePage> {
           child: Icon(icon, color: color),
         ),
         title: Text(meal, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        trailing: Text('Wasted: ${wasted.toStringAsFixed(2)} units', style: const TextStyle(fontSize: 14, color: Colors.red)),
+        trailing: Text('${wasted.toStringAsFixed(2)}g Wasted', style: const TextStyle(fontSize: 14, color: Colors.red)), // Assuming units are grams
       ),
     );
   }
@@ -202,6 +231,8 @@ class _HomePageState extends State<HomePage> {
   void _logout() async {
     bool shouldLogout = await _showLogoutDialog();
     if (shouldLogout) {
+      await _authService.logout(); // Perform Firebase logout
+      if (!mounted) return; // Check if the widget is still in the tree before navigating
       Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const LoginScreen()));
     }
   }
@@ -217,7 +248,7 @@ class _HomePageState extends State<HomePage> {
           TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Logout')),
         ],
       ),
-    ).then((value) => value ?? false);
+    ).then((value) => value ?? false); // Ensure a boolean is always returned
   }
 
   @override
@@ -225,7 +256,8 @@ class _HomePageState extends State<HomePage> {
     Widget activePage;
     switch (_selectedIndex) {
       case 1:
-        activePage = AnalysisPage(username: widget.username, rollNumber: widget.email);
+      // Pass the uid to the AnalysisPage
+        activePage = AnalysisPage(username: widget.username, rollNumber: widget.username, uid: widget.uid);
         break;
       case 2:
         activePage = const ContactPage();
