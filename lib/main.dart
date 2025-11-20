@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:mitush/splashscreen.dart';
 import 'Loginpage.dart';
-
 import 'package:firebase_core/firebase_core.dart';
 
 void main() async {
@@ -14,7 +13,6 @@ void main() async {
   }
 }
 
-
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -22,10 +20,11 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Food Wastage',
+      debugShowCheckedModeBanner: false,   // 🔥 THIS REMOVES THE DEBUG BANNER
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      home: const SplashScreen(), // Start with the login page
+      home: const SplashScreen(),
     );
   }
 }

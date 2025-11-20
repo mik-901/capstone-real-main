@@ -1,4 +1,4 @@
-package com.example.mitush
+package com.food.waste
 
 import io.flutter.embedding.android.FlutterActivity
 

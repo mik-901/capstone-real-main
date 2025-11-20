@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "501266132037",
-    "project_id": "capstone-b4380",
-    "storage_bucket": "capstone-b4380.firebasestorage.app"
+    "project_number": "502923056532",
+    "project_id": "food-wastage-b9a8a",
+    "storage_bucket": "food-wastage-b9a8a.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:501266132037:android:f677c23516f7a7ee23072c",
+        "mobilesdk_app_id": "1:502923056532:android:afba4f97ffc463c2816b81",
         "android_client_info": {
-          "package_name": "com.example.mitush"
+          "package_name": "com.food.waste"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyC6k3OiDyjtVx-NHn6jWwvZYGto0u9fPdo"
+          "current_key": "AIzaSyAzTuEstRitqkYIt8B2kyDc5ZPy1FvJf28"
         }
       ],
       "services": {

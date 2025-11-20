@@ -99,32 +99,28 @@ class _LoginScreenState extends State<LoginScreen> {
         throw ArgumentError("Roll number and password cannot be empty.");
       }
 
-      // Remove spaces/newlines
       final cleanRoll = roll.replaceAll(" ", "").replaceAll("\n", "");
-
-      // Convert roll → hidden email
       final email = "$cleanRoll@gmail.com";
 
-      // Firebase login - now returns UserCredential
-      final UserCredential userCredential = await _authService.login(email, password);
-      final User? user = userCredential.user;
+      // Firebase login
+      final UserCredential userCredential =
+      await _authService.login(email, password);
 
+      final User? user = userCredential.user;
       if (user == null) {
         throw Exception("Login failed: No user information found after authentication.");
       }
 
-      // Extract username (roll number) and the crucial Firebase Auth UID
-      String username = cleanRoll;
-      String firebaseUid = user.uid; // Get the user's UID
+      final String firebaseUid = user.uid;
 
-      // Navigate to HomePage, passing the roll number and Firebase UID
+      // Home Page with proper Parameter
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (_) => HomePage(
-            username: username,
-            email: email, // You might still want to pass this
-            uid: firebaseUid, // <-- Pass the Firebase Auth UID
+            username: cleanRoll,   // <-- roll number
+            email: email,          // <-- rollNumber@gmail.com
+            uid: firebaseUid,      // <-- FirebaseAuth UID
           ),
         ),
       );
@@ -140,6 +136,7 @@ class _LoginScreenState extends State<LoginScreen> {
       );
     }
   }
+
 
   @override
   Widget build(BuildContext context) {
