@@ -1,4 +1,4 @@
-# mitush
+# Smart Food waste Management System Integrating IoT+ML+App
 
 A new Flutter project.
 
